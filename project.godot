@@ -1,0 +1,20 @@
+config_version=5
+
+[application]
+config/name="Room Explorer 3D"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.4", "GL Compatibility")
+config/description="A small first-person room exploration game."
+
+[display]
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/handheld/orientation=0
+window/stretch/mode="canvas_items"
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/default_filters/use_nearest_mipmap_filter=false
+environment/defaults/default_clear_color=Color(0.08, 0.1, 0.14, 1)
+textures/vram_compression/import_etc2_astc=true
