@@ -1,0 +1,136 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    name: Export Android APK
+    runs-on: ubuntu-latest
+    container:
+      image: barichello/godot-ci:4.4.1
+
+    env:
+      ANDROID_HOME: /usr/lib/android-sdk
+      ANDROID_SDK_ROOT: /usr/lib/android-sdk
+      JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare Godot Android environment
+        shell: bash
+        run: |
+          set -e
+
+          TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/4.4.1.stable"
+          mkdir -p "$TEMPLATE_DIR"
+
+          if [ -d /root/.local/share/godot/export_templates/4.4.1.stable ]; then
+            cp -a /root/.local/share/godot/export_templates/4.4.1.stable/. "$TEMPLATE_DIR/"
+          fi
+
+          if [ ! -f "$TEMPLATE_DIR/android_debug.apk" ] || [ ! -f "$TEMPLATE_DIR/android_release.apk" ]; then
+            echo "ERROR: Godot 4.4.1 Android export templates are missing."
+            ls -la "$TEMPLATE_DIR" || true
+            exit 1
+          fi
+
+          mkdir -p "$HOME/.config/godot" "$HOME/.android"
+
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+          cat > "$HOME/.config/godot/editor_settings-4.4.tres" <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/java_sdk_path = "$JAVA_HOME"
+          export/android/android_sdk_path = "$ANDROID_HOME"
+          export/android/debug_keystore = "$HOME/.android/debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          export/android/force_system_user = false
+          export/android/timestamping_authority_url = ""
+          export/android/shutdown_adb_on_exit = true
+          EOF
+
+          echo "Godot:"
+          godot --version
+          echo "Java:"
+          java -version
+          echo "Android SDK:"
+          test -x "$ANDROID_HOME/platform-tools/adb"
+          echo "Templates and keystore:"
+          ls -lh "$TEMPLATE_DIR/android_debug.apk" "$TEMPLATE_DIR/android_release.apk" "$HOME/.android/debug.keystore"
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -e
+
+          SDKMANAGER="$(find "$ANDROID_HOME" -type f -name sdkmanager -print -quit)"
+          if [ -z "$SDKMANAGER" ]; then
+            echo "ERROR: sdkmanager not found"
+            exit 1
+          fi
+
+          set +e
+          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses
+          set -e
+
+          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" \
+            "platform-tools" \
+            "platforms;android-34" \
+            "build-tools;34.0.0"
+
+      - name: Check project and Android preset
+        shell: bash
+        run: |
+          set -e
+          test -f project.godot
+          test -f main.tscn
+          test -f export_presets.cfg
+          grep -q 'name="Android"' export_presets.cfg
+          grep -q 'textures/vram_compression/import_etc2_astc=true' project.godot
+          echo "Project files and Android preset found."
+          echo "Texture import setting:"
+          grep 'textures/vram_compression/import_etc2_astc' project.godot
+
+      - name: Import project
+        shell: bash
+        run: |
+          set -e
+          godot --headless --editor --path "$GITHUB_WORKSPACE" --import
+
+      - name: Export APK
+        shell: bash
+        run: |
+          set -e
+          mkdir -p build
+          godot --headless --path "$GITHUB_WORKSPACE" \
+            --export-debug "Android" "$GITHUB_WORKSPACE/build/RoomExplorer3D.apk" \
+            --verbose
+          test -s build/RoomExplorer3D.apk
+          ls -lh build/RoomExplorer3D.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: RoomExplorer3D-Android
+          path: build/RoomExplorer3D.apk
+          if-no-files-found: error
+          retention-days: 14
+          
